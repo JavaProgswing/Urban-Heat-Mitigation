@@ -1,0 +1,75 @@
+# Project configuration. Edit AOI + dates + GEE project before running.
+
+project:
+  name: urban-heat-ai
+  crs: "EPSG:4326"
+  resolution_m: 30          # working grid resolution
+
+# Area of interest. Default = example city bbox [minlon, minlat, maxlon, maxlat].
+# Replace with target city (e.g. Delhi: [76.84, 28.40, 77.35, 28.88]).
+aoi:
+  name: "delhi_core"
+  # Central Delhi urban core [minlon, minlat, maxlon, maxlat] (~14x14 km).
+  # Small on purpose: fast GEE export. Widen for full NCR once it works.
+  bbox: [77.15, 28.55, 77.28, 28.68]
+
+# Time window for compositing (cloud-free median).
+time:
+  start: "2023-04-01"      # pre-monsoon hot season (Delhi peak heat Apr-Jun)
+  end: "2023-06-15"        # before monsoon onset / cloud
+  season: "summer"
+  lst_years: 3             # composite this season across the last N years for a
+                           # cleaner (less per-acquisition-noise) LST target
+
+gee:
+  project: "procurementai-472604"   # set after gee_auth.py; your Cloud project id
+
+# Optional cross-sensor validation: fetch ECOSTRESS LST (~70 m) and compare to
+# the Landsat target. Off by default (sparse ISS coverage + extra export time).
+validate:
+  ecostress: false
+
+era5:
+  cds_dataset: "reanalysis-era5-land"
+  variables: ["2m_temperature", "2m_dewpoint_temperature",
+              "10m_u_component_of_wind", "10m_v_component_of_wind"]
+
+# Physics priors for effects the correlational model cannot identify.
+# albedo is confounded with NDBI/NDVI, so its ML sensitivity ~0; anchor the
+# cool-roof / cool-pavement response to a literature value instead.
+# lst_per_albedo: local d(LST)/d(albedo). Surface energy balance gives
+# ~S_down/(4*eps*sigma*T^3 + h) ~ 25-45 K per unit albedo at peak insolation,
+# falling to ~15-25 at Landsat overpass / 30 m mixed pixels. Satellite white-vs-
+# dark roof studies show ~10-20 C LST drops for large albedo change; Sharma et al.
+# (2017, RSASE) model albedo-LST cooling for Indian cities. 15 -> Delta 0.4 ~ 6 C.
+physics:
+  lst_per_albedo: 15.0   # deg C surface (LST) cooling per +1.0 albedo
+  lst_per_ndvi:   8.0    # deg C cooling per +1.0 NDVI (greening; ~3.2 C at d0.4,
+                         # ~2.4 C green roofs d0.3 — matches tree-canopy studies).
+                         # ML alone gives ~0.4 C (correlational blind spot), so floor.
+  lst_per_ndwi:   6.0    # deg C cooling per +1.0 NDWI (water; ~3 C at delta 0.5)
+  max_cooling_C:  8.0    # cap per single intervention (area-averaged realism)
+
+# Cooling interventions: per-strategy physical effect priors (calibratable).
+# delta = the driver change applied to eligible pixels; LST response then comes
+# from the model (vegetation/water) or the physics anchor (albedo). Literature
+# LST-cooling ranges per strategy (for sanity-checking outputs):
+#   cool roofs / high-albedo paint : ~5-15 C roof surface (albedo +0.3-0.5)
+#   cool / permeable pavements      : ~3-4 C (up to far more when watered)
+#   urban greening (tree canopy)    : ~2-8 C surface (1.5 C global median)
+#   green roofs                     : ~2-4 C warm season (less when dry)
+#   water bodies / wetlands         : ~3-5 C local
+# Sources: WRI urban trees; Nature Comms 2021 (EU trees); npj Urban Sust. roofs.
+scenarios:
+  cool_roofs:        { albedo_delta:  0.40, applies_to: "built"      }
+  cool_pavements:    { albedo_delta:  0.25, applies_to: "impervious" }
+  high_albedo_paint: { albedo_delta:  0.30, applies_to: "built"      }
+  green_roofs:       { ndvi_delta:    0.30, applies_to: "built"      }
+  urban_greening:    { ndvi_delta:    0.40, applies_to: "open"       }
+  water_body:        { ndwi_delta:    0.50, applies_to: "water"      }
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"
+  external: "data/external"
+  outputs: "outputs"

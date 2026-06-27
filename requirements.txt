@@ -1,0 +1,36 @@
+# --- geospatial core ---
+earthengine-api>=0.1.390
+geemap>=0.32
+rasterio>=1.3
+rioxarray>=0.15
+xarray>=2024.1
+geopandas>=0.14
+shapely>=2.0
+pyproj>=3.6
+osmnx>=1.9
+
+# --- meteorology / climate ---
+cdsapi>=0.6            # ERA5 download (Copernicus CDS)
+netCDF4>=1.6
+
+# --- ML ---
+numpy>=1.26,<2.3      # cap: venv_climate's TensorFlow 2.18 needs numpy<2.1
+pandas>=2.1
+scikit-learn>=1.4
+# torch: on Windows the default wheel can fail to load (c10.dll). Prefer WSL,
+# or install the CPU wheel: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2             # physics-informed NN
+shap>=0.44             # driver attribution
+xgboost>=2.0           # baseline / feature importance
+
+# --- viz / dashboard ---
+folium>=0.15
+matplotlib>=3.8
+plotly>=5.18
+streamlit>=1.31
+
+# --- utils ---
+pyyaml>=6.0
+python-dotenv>=1.0
+tqdm>=4.66
+joblib>=1.3
