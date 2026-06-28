@@ -12,6 +12,36 @@ def regrid(df, values, shape):
     return grid
 
 
+def labeled_heatmap(lst, zones_df=None, lst_range=None, cmap="turbo"):
+    """Static neighbourhood heat map: LST raster + per-zone name/temp labels.
+
+    The 'city dashboard' look — turbo colours, labelled districts, a slim
+    colourbar — on a transparent background for the dark theme. Returns a
+    matplotlib Figure for st.pyplot.
+    """
+    import matplotlib.pyplot as plt
+    lo, hi = lst_range or (float(np.nanmin(lst)), float(np.nanmax(lst)))
+    fig, ax = plt.subplots(figsize=(7.6, 6.2))
+    fig.patch.set_alpha(0.0)
+    ax.set_facecolor("none")
+    im = ax.imshow(lst, cmap=cmap, vmin=lo, vmax=hi, interpolation="nearest")
+    ax.axis("off")
+    if zones_df is not None:
+        for _, z in zones_df.iterrows():
+            ax.text(z["col"], z["row"], f"{z['zone']}\n{z['mean_lst']:.1f}°C",
+                    ha="center", va="center", fontsize=8, color="white",
+                    fontweight="bold", linespacing=1.05,
+                    bbox=dict(boxstyle="round,pad=0.28",
+                              fc=(0.04, 0.06, 0.09, 0.80),
+                              ec=(1, 1, 1, 0.22), lw=0.6))
+    cb = fig.colorbar(im, ax=ax, shrink=0.82, pad=0.02)
+    cb.set_label("Surface Temp (°C)", color="#cbd5e1", fontsize=9)
+    cb.ax.tick_params(colors="#cbd5e1", labelsize=8)
+    cb.outline.set_edgecolor((1, 1, 1, 0.15))
+    fig.tight_layout()
+    return fig
+
+
 # --- RGBA overlays for the interactive (Leaflet) map ----------------------- #
 # Each returns a float (H,W,4) RGBA array with alpha=0 where there is no data,
 # so the base map shows through. folium.ImageOverlay maps it to the AOI bounds,

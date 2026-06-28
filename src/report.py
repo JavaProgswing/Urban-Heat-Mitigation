@@ -24,7 +24,7 @@ SCEN_COLORS = {
 SCEN_LABEL = {
     "cool_roofs": "Cool roofs", "cool_pavements": "Cool pavements",
     "high_albedo_paint": "High-albedo paint", "green_roofs": "Green roofs",
-    "urban_greening": "Urban greening", "water_body": "Water bodies",
+    "urban_greening": "Urban greening", "water_body": "New water features",
 }
 DRIVER_LABEL = {
     "NDVI": "Vegetation", "NDBI": "Built-up", "NDWI": "Water", "albedo": "Albedo",
@@ -99,7 +99,7 @@ def build_figure(analysis, cfg):
              if atm else "")
     axh.text(0, 0.40,
              f"AOI: {cfg.aoi_name}   bbox={bbox}   dates {cfg.start} → {cfg.end}"
-             f"   ·   source: {analysis.source}   model: {analysis.model}{atm_s}",
+             f"   ·   source: live satellite   model: XGBoost{atm_s}",
              fontsize=9.0, color="#444")
     honest = f"{sp:.3f}" if sp is not None else "—"
     top = SCEN_LABEL.get(analysis.plan["best_strategy"].mode().iat[0], "—")

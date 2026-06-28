@@ -211,7 +211,15 @@ def optimize(results: dict[str, ScenarioResult], df: pd.DataFrame,
         best_name = np.where(better, name, best_name)
 
     pop = df[pop_col].to_numpy() if pop_col in df else np.ones(n)
-    score = best_cool * (1.0 + np.log1p(np.clip(pop, 0, None)))
+    # Priority must include the heat burden itself. Previously a cool but very
+    # populated cell could outrank a genuine hotspot because score only used
+    # cooling potential x population. Use modeled LST when available and retain
+    # only positive excess above the city median as the heat-risk multiplier.
+    temp_col = "predicted_LST" if "predicted_LST" in df else "LST"
+    temp = df[temp_col].to_numpy() if temp_col in df else np.ones(n)
+    heat_excess = np.maximum(temp - np.nanmedian(temp), 0.0)
+    score = (best_cool * (1.0 + heat_excess) *
+             (1.0 + np.log1p(np.clip(pop, 0, None))))
     has = best_cool > 0                                  # pixel has a useful action
     order = np.argsort(-score)
     order = order[has[order]]                            # all actionable, ranked
@@ -222,6 +230,8 @@ def optimize(results: dict[str, ScenarioResult], df: pd.DataFrame,
         "col": df["col"].to_numpy()[order] if "col" in df else 0,
         "best_strategy": best_name[order],
         "cooling_C": best_cool[order],
+        "surface_temp_C": temp[order],
+        "heat_excess_C": heat_excess[order],
         "pop": pop[order],
         "score": score[order],
     }).reset_index(drop=True)

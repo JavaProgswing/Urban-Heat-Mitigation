@@ -1,6 +1,6 @@
 """Offline test of raster alignment (no Earth Engine).
 
-Writes synthetic GeoTIFFs at DIFFERENT resolutions, then checks align_stack
+Writes temporary GeoTIFF fixtures at DIFFERENT resolutions, then checks align_stack
 reproject-matches them all onto the reference grid. Validates the real-data
 bridge without needing GEE auth. Skips cleanly if rasterio is absent.
 """

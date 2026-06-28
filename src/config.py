@@ -1,7 +1,7 @@
 """Load config.yaml + .env into a single typed config object."""
 from __future__ import annotations
 import copy
-import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +10,27 @@ import yaml
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
+_GCP_PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
+_PROJECT_PLACEHOLDERS = {
+    "your-project-id", "your-gee-project-id", "gee-project-id", "project-id",
+}
+
+
+def validate_gee_project(value: Any) -> str:
+    """Return a valid Google Cloud project id or raise an actionable error."""
+    project = "" if value is None else str(value).strip()
+    if not project or project.lower() in _PROJECT_PLACEHOLDERS:
+        raise ValueError(
+            "Google Earth Engine project is not configured. Set `gee.project` "
+            "in config.yaml to the Google Cloud project registered for Earth Engine."
+        )
+    if not _GCP_PROJECT_RE.fullmatch(project):
+        raise ValueError(
+            f"Invalid Google Earth Engine project id in config.yaml: {project!r}. "
+            "Use 6-30 lowercase letters, digits, or hyphens; start with a letter "
+            "and end with a letter or digit."
+        )
+    return project
 
 
 @dataclass
@@ -50,7 +71,7 @@ class Config:
 
     @property
     def gee_project(self) -> str:
-        return os.getenv("GEE_PROJECT_ID") or self.raw["gee"]["project"]
+        return validate_gee_project(self.raw.get("gee", {}).get("project"))
 
     @property
     def scenarios(self) -> dict[str, dict]:
@@ -82,8 +103,8 @@ class Config:
         return p
 
     def override(self, *, bbox=None, start=None, end=None,
-                 name=None, project=None) -> "Config":
-        """Return a copy with runtime AOI/date/project overrides (for the UI).
+                 name=None) -> "Config":
+        """Return a copy with runtime AOI/date overrides (for the UI).
         Lets the dashboard analyze any region/dates without editing config.yaml.
         """
         raw = copy.deepcopy(self.raw)
@@ -95,8 +116,6 @@ class Config:
             raw["time"]["start"] = str(start)
         if end is not None:
             raw["time"]["end"] = str(end)
-        if project is not None:
-            raw["gee"]["project"] = project
         return Config(raw=raw, root=self.root)
 
 

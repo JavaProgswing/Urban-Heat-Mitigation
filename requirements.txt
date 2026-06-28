@@ -17,14 +17,12 @@ netCDF4>=1.6
 numpy>=1.26,<2.3      # cap: venv_climate's TensorFlow 2.18 needs numpy<2.1
 pandas>=2.1
 scikit-learn>=1.4
-# torch: on Windows the default wheel can fail to load (c10.dll). Prefer WSL,
-# or install the CPU wheel: pip install torch --index-url https://download.pytorch.org/whl/cpu
-torch>=2.2             # physics-informed NN
 shap>=0.44             # driver attribution
-xgboost>=2.0           # baseline / feature importance
+xgboost>=2.0           # production model with monotonic physics constraints
 
 # --- viz / dashboard ---
 folium>=0.15
+streamlit-folium>=0.20
 matplotlib>=3.8
 plotly>=5.18
 streamlit>=1.31

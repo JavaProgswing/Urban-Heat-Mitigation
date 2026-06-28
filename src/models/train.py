@@ -1,7 +1,6 @@
 """Train + evaluate the LST model and quantify driver importance.
 
-Baseline: gradient-boosted trees (fast, gives SHAP driver attribution).
-Main: PINN (physics-constrained, used for scenario extrapolation).
+Production model: monotonic-constrained XGBoost with SHAP attribution.
 Driver quantification answers objective #2 ("analyze drivers of urban heating").
 """
 from __future__ import annotations
@@ -12,7 +11,6 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import KFold, train_test_split
 
 from ..features.drivers import split_xy, PHYSICS_SIGNS, TARGET_COL
-from .pinn import PINN, PINNConfig
 
 
 @dataclass
@@ -189,18 +187,6 @@ def train_xgb(df, test_size=0.2, seed=0, physics=True, cv=True,
                        eval={"y_true": yte.tolist(), "y_pred": pred.tolist()})
 
 
-def train_pinn(df, cfg: PINNConfig | None = None,
-               test_size=0.2, seed=0) -> TrainResult:
-    X, y, cols = split_xy(df)
-    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_size,
-                                          random_state=seed)
-    model = PINN(cols, cfg).fit(Xtr, ytr)
-    pred = model.predict(Xte)
-    imp = _perm_importance(model, Xte, yte, cols)
-    return TrainResult(model, cols, _metrics(yte, pred), imp,
-                       eval={"y_true": yte.tolist(), "y_pred": pred.tolist()})
-
-
 def _shap_importance(model, X, cols, max_rows=2000, seed=0):
     """Mean |SHAP| per feature. SHAP cost scales with rows, and importance is a
     row-mean, so a ~2000-row sample gives the same ranking far faster (TreeExplainer
@@ -215,17 +201,3 @@ def _shap_importance(model, X, cols, max_rows=2000, seed=0):
                            key=lambda kv: -kv[1]))
     except Exception:
         return dict(zip(cols, map(float, model.feature_importances_)))
-
-
-def _perm_importance(model, X, y, cols, n_repeats=5, seed=0):
-    rng = np.random.default_rng(seed)
-    base = mean_absolute_error(y, model.predict(X))
-    out = {}
-    for j, c in enumerate(cols):
-        deltas = []
-        for _ in range(n_repeats):
-            Xp = X.copy()
-            Xp[:, j] = rng.permutation(Xp[:, j])
-            deltas.append(mean_absolute_error(y, model.predict(Xp)) - base)
-        out[c] = float(np.mean(deltas))
-    return dict(sorted(out.items(), key=lambda kv: -kv[1]))

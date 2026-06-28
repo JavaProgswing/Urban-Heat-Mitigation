@@ -44,8 +44,8 @@ DRIVER_COLS = ["NDVI", "NDBI", "NDWI", "albedo", "build_frac", "BLD_H",
                "ELEV", "WATER_DIST"] + TEXTURE_COLS + CONTEXT_COLS + LULC_COLS
 TARGET_COL = "LST"
 
-# Physics priors on the sign of d(LST)/d(driver). Used both as PINN gradient
-# penalties and as XGBoost monotonic constraints, so extrapolation to unseen
+# Physics priors on the sign of d(LST)/d(driver). Used as XGBoost monotonic
+# constraints, so extrapolation to unseen
 # intervention states (e.g. raised albedo) stays physically consistent.
 #   -1 : more of this driver -> cooler ;  +1 : -> hotter ;  0 : unconstrained
 PHYSICS_SIGNS = {

@@ -6,15 +6,20 @@ the default 'gcloud' mode can't find/run gcloud).
 
     python scripts/gee_auth.py                       # notebook flow (robust)
     python scripts/gee_auth.py --mode localhost      # auto browser+redirect
-    python scripts/gee_auth.py --project my-proj-id  # also verify connection
 
 Prereq: a Google account registered for Earth Engine + a Cloud project id
 (free for research/non-commercial at https://earthengine.google.com).
-After this, set `gee.project` in config.yaml (or GEE_PROJECT_ID in .env),
-then run:  python scripts/run_pipeline.py --source gee
+Set `gee.project` in config.yaml before running this command.
 """
 from __future__ import annotations
 import argparse
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from src.config import load_config  # noqa: E402
 
 
 def main():
@@ -24,20 +29,21 @@ def main():
                     help="auth flow; 'localhost' auto-captures code in browser "
                          "(no paste); 'notebook' = manual paste. Neither needs "
                          "gcloud")
-    ap.add_argument("--project", default=None,
-                    help="GEE Cloud project id to verify initialization")
     args = ap.parse_args()
+    try:
+        project = load_config().gee_project
+    except ValueError as exc:
+        ap.error(str(exc))
 
     import ee
     print(f"Earth Engine authentication (mode={args.mode}) ...")
     ee.Authenticate(auth_mode=args.mode)     # notebook = paste-code, no gcloud
     print("Authenticated. Token saved to your user profile.")
 
-    if args.project:
-        ee.Initialize(project=args.project)
-        n = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").limit(1).size().getInfo()
-        print(f"Connected to project '{args.project}' (test query OK, n={n}). "
-              f"Ready for: python scripts/run_pipeline.py --source gee")
+    ee.Initialize(project=project)
+    n = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").limit(1).size().getInfo()
+    print(f"Connected to the configured project (test query OK, n={n}). "
+          f"Ready for: python scripts/run_pipeline.py")
 
 
 if __name__ == "__main__":

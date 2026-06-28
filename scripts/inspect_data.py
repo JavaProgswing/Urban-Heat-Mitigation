@@ -5,8 +5,7 @@ Shows, for the current AOI:
   - the aligned per-pixel driver table (head + stats)
   - a sample of model predictions vs observed LST
 
-    python scripts/inspect_data.py                 # synthetic
-    python scripts/inspect_data.py --source gee     # the real tiles you exported
+    python scripts/inspect_data.py
 """
 from __future__ import annotations
 import argparse
@@ -20,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.config import load_config                 # noqa: E402
-from src.features import drivers, synthetic         # noqa: E402
+from src.features import drivers                    # noqa: E402
 from src.models.train import train_xgb              # noqa: E402
 
 pd.set_option("display.width", 140)
@@ -32,7 +31,7 @@ def show_rasters(cfg):
     raw = cfg.path("raw")
     tifs = sorted(raw.glob("*.tif"))
     if not tifs:
-        print("  (no GeoTIFFs in data/raw — run --source gee first)")
+        print("  (no GeoTIFFs in data/raw — run the pipeline first)")
         return
     print(f"\n=== Downloaded rasters in {raw} ===")
     for t in tifs:
@@ -52,30 +51,24 @@ def show_rasters(cfg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", choices=["synthetic", "gee"], default="synthetic")
     ap.add_argument("--rows", type=int, default=8)
     args = ap.parse_args()
 
     cfg = load_config()
     print(f"AOI: {cfg.aoi_name}  bbox={cfg.bbox}  dates={cfg.start}..{cfg.end}")
 
-    # Build the driver stack WITHOUT re-exporting: synthetic generator, or
-    # align the GeoTIFFs already in data/raw (the exact tiles last used).
-    if args.source == "gee":
-        show_rasters(cfg)
-        from src.data.align import align_stack, derive_drivers, _default_name
-        paths = {}
-        for name in ("landsat", "sentinel", "era5", "ghsl", "terrain"):
-            p = cfg.path("raw") / _default_name(name, cfg)
-            if p.exists():
-                paths[name] = str(p)
-        if "landsat" not in paths:
-            print("\nNo cached Landsat tile. Run: python scripts/run_pipeline.py "
-                  "--source gee")
-            return
-        stack = derive_drivers(align_stack(paths, ref="landsat"))
-    else:
-        stack = synthetic.make_grid(n=128)
+    # Align the exact live GeoTIFFs most recently exported for the configured AOI.
+    show_rasters(cfg)
+    from src.data.align import align_stack, derive_drivers, _default_name
+    paths = {}
+    for name in ("landsat", "sentinel", "era5", "ghsl", "ghsl_h", "terrain"):
+        p = cfg.path("raw") / _default_name(name, cfg)
+        if p.exists():
+            paths[name] = str(p)
+    if "landsat" not in paths:
+        print("\nNo cached Landsat tile. Run: python scripts/run_pipeline.py")
+        return
+    stack = derive_drivers(align_stack(paths, ref="landsat"))
 
     df = drivers.stack_to_frame(stack)
     if "POP" not in df:

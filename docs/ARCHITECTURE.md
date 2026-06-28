@@ -1,115 +1,89 @@
 # Architecture & Workings
 
-Full reference: what each file does, how the system works, datasets, accuracy.
+Production architecture for the live satellite + XGBoost urban-heat system.
 
-## 1. What the project performs
+## 1. Decision workflow
 
-Four-stage decision-support system for urban heat:
-
-1. **Identify hotspots** — build a land-surface-temperature (LST) grid, flag the hottest pixels (top decile).
-2. **Quantify drivers** — train an ML model on LST vs physical/morphological drivers, then rank driver influence (SHAP / permutation importance).
-3. **Model heat dynamics (physics-informed)** — the model is constrained so that physically-known relationships hold (more vegetation/albedo → cooler; more built-up → hotter). This keeps predictions sane when simulating interventions never seen in training.
-4. **Generate + optimize cooling** — counterfactually apply each intervention (cool roofs, greening, water…), re-predict LST, measure ΔLST, then optimize *where* to act under a coverage budget weighted by population exposure.
+1. **Identify hotspots** — create a seasonal Landsat LST grid and flag the hottest decile.
+2. **Quantify drivers** — model LST from vegetation, built form, albedo, water, terrain, texture, and neighbourhood context; explain it with SHAP.
+3. **Constrain the physics** — XGBoost monotonic constraints ensure vegetation, water, and albedo cannot reverse into heating effects during counterfactual simulation.
+4. **Optimize interventions** — edit eligible drivers, estimate ΔLST, and rank actions using cooling × heat excess × population exposure.
+5. **Place actions on real assets** — assign roof strategies to OSM buildings, pavement strategies to roads, and nature-based strategies to mapped open land.
 
 ## 2. Data flow
 
 ```
- data sources (GEE / OSM)                features              model              scenarios
- ─────────────────────────              ─────────             ───────            ──────────
- Landsat8 / ECOSTRESS  ── LST ─┐
- Sentinel-2  ── NDVI/NDBI/NDWI ─┤
- ERA5  ── AIR_T/RH/WIND ────────┼─► driver stack ─► train ─► LST model ─► apply edit ─► ΔLST ─► optimize
- OSM   ── build_frac/height ────┤   (per-pixel df)  (XGB/PINN)  R²≈0.87     (counterfactual)   (plan.csv)
- GHSL  ── built/POP ────────────┘
+Landsat 8/9 LST ───────────────┐
+Sentinel-2 + WorldCover ───────┤
+GHSL built/pop/height ─────────┼─► aligned driver grid ─► monotonic XGBoost
+SRTM terrain ──────────────────┤                              │
+ERA5 scene context ────────────┘                              ▼
+                                              SHAP + cooling counterfactuals
+                                                             │
+OSM buildings/roads/open land/water ─────────────────────────┤
+                                                             ▼
+                                              parcel GeoJSON + dashboard map
 ```
 
-Offline mode swaps the data sources for `features/synthetic.py` (physically-plausible generated grid) so everything runs with no Earth Engine auth.
+OSM does not increase thermal resolution. It supplies feasible placement geometry, nearby named references, coordinates, and map links after modeling.
 
-## 3. File-by-file
+## 3. Main modules
 
-### Config & entry
+### Entry and orchestration
+
 | File | Role |
 |------|------|
-| `config.yaml` | AOI bbox, date window, GEE project, per-strategy physical effect priors, paths |
-| `.env.example` | secrets template (GEE project id, CDS API key) → copy to `.env` |
-| `src/config.py` | loads yaml+env into a `Config`; `.override(bbox,start,end,…)` for runtime AOI/date changes from the UI |
-| `src/pipeline.py` | `run_analysis(cfg, source, model)` — the shared end-to-end function used by BOTH the CLI and the dashboard (single source of truth) |
-| `src/geocode.py` | place name ('Mumbai', 'Karnataka') → AOI bbox (osmnx), clipped to a max-km box |
-| `scripts/run_pipeline.py` | **CLI orchestrator** — wraps `run_analysis`, writes `outputs/`; flags `--city/--bbox/--start/--end/--source/--model` |
-| `scripts/gee_auth.py` | Earth Engine auth (localhost flow, no gcloud); run on Windows so the browser opens |
-| `scripts/inspect_data.py` | **verifier** — raster stats of downloaded tiles + per-pixel driver table + predictions vs observed |
-| `dashboard/app.py` | Streamlit UI: pick region by name/bbox + dates + Demo/Live, runs analysis, shows heat map + drivers + scenarios + plan |
-| `requirements-windows.txt` | Windows deps without torch (XGB path); `requirements.txt` = full incl. torch for WSL/PINN |
-| `pytest.ini` | test config; disables a global web3 pytest plugin that breaks collection |
+| `config.yaml` | AOI, date window, GEE project, physical scenario priors, paths |
+| `src/pipeline.py` | Single production chain: live acquisition → XGBoost → scenarios → optimization |
+| `scripts/run_pipeline.py` | CLI for a configured AOI, city search, or manual bbox |
+| `dashboard/app.py` | Streamlit interface and Leaflet parcel map |
+| `scripts/inspect_data.py` | Inspect the cached live rasters and predictions |
 
-### Data acquisition (`src/data/`) — one module per requested dataset
-| File | Dataset | Output |
-|------|---------|--------|
-| `gee_init.py` | shared Earth Engine init + AOI geometry | — |
-| `landsat.py` | **Landsat 8** C2-L2 `ST_B10` | LST °C composite (cloud-masked median) |
-| `ecostress.py` | **ECOSTRESS** L2T_LSTE | high-res (~70 m) LST °C; GEE or local GeoTIFF |
-| `sentinel.py` | **Sentinel-2** SR + ESA WorldCover | bands + NDVI/NDBI/NDWI + **real broadband ALBEDO** (Bonafoni 2020) + LULC |
-| `era5.py` | **ERA5-Land** (+ CPCB hook) | air temp, RH (Magnus from dewpoint), wind speed |
-| `terrain.py` | **SRTM** (USGS/SRTMGL1_003) | ELEV — elevation driver (lapse rate) |
-| `osm.py` | **OpenStreetMap** via osmnx | building footprint fraction, mean height, road density |
-| `ghsl.py` | **GHSL** built-up + population | built fraction (impervious proxy), population (exposure) |
+### Data acquisition
 
-11 model drivers: NDVI, NDBI, NDWI, albedo (real S2), build_frac, ELEV, WATER_DIST (distance-to-water from NDWI), NDVI_STD (vegetation texture), AIR_T, RH, WIND. WATER_DIST + NDVI_STD are computed locally in `align.spatial_drivers` (no extra GEE).
+| File | Dataset/output |
+|------|----------------|
+| `src/data/landsat.py` | Landsat 8/9 C2-L2 surface-temperature composite |
+| `src/data/sentinel.py` | Sentinel-2 indices, albedo, and ESA WorldCover |
+| `src/data/ghsl.py` | Built surface, population, and building height |
+| `src/data/era5.py` | Air temperature, humidity, and wind scene context |
+| `src/data/terrain.py` | SRTM elevation |
+| `src/data/ecostress.py` | Optional independent LST validation |
+| `src/data/osm.py` | Cached buildings, roads, open land, and water geometry |
+| `src/data/align.py` | Reproject all raster sources to the Landsat reference grid |
 
-### Features (`src/features/`)
+### Features, model, and planning
+
 | File | Role |
 |------|------|
-| `indices.py` | NDVI/NDBI/NDWI math; albedo (Liang broadband, or NDVI-proxy fallback) |
-| `drivers.py` | **core schema** — `DRIVER_COLS`, `TARGET_COL`, `PHYSICS_SIGNS` (sign of ∂LST/∂driver), stack→per-pixel DataFrame, `split_xy`, `hotspots()` |
-| `synthetic.py` | offline driver grid; LST generated from drivers via energy-balance-like relation + noise (gives the model a real signal to recover) |
+| `src/features/drivers.py` | Driver schema, physical signs, frame assembly, hotspots |
+| `src/models/train.py` | XGBoost training, spatial validation, SHAP importance |
+| `src/scenarios/cooling.py` | Counterfactual cooling and heat/exposure-aware ranking |
+| `src/features/parcels.py` | Semantic OSM asset allocation and location references |
+| `src/viz/maps.py` | Raster visualization helpers |
 
-### Models (`src/models/`)
-| File | Role |
-|------|------|
-| `pinn.py` | **Physics-Informed NN** (PyTorch). Data loss = MSE; physics loss = autograd-gradient penalties enforcing `PHYSICS_SIGNS` pointwise. Normalizes X and y, ramps physics weight, seeded/deterministic. |
-| `train.py` | `train_xgb` (monotonic-constrained gradient boosting), `train_pinn`, k-fold `cross_validate`, SHAP + permutation importance, rich metrics (MAE/RMSE/R²) |
+## 4. Model and validation
 
-### Scenarios & viz
-| File | Role |
-|------|------|
-| `scenarios/cooling.py` | `apply_intervention` (edit eligible pixels' drivers), `simulate`/`simulate_all` (ΔLST = before − after), `optimize` (greedy best-per-pixel under budget, pop-weighted) |
-| `viz/maps.py` | LST heatmap, driver-importance bar, scenario-cooling bar, predicted-vs-observed validation scatter, interactive folium Leaflet map |
+The only supported model is XGBoost with `monotone_constraints` derived from `PHYSICS_SIGNS`. It is early-stopped, regularized, and capped to a representative training sample for large AOIs while inference still covers every valid pixel.
 
-## 4. Why "physics-informed" (the key idea)
+Validation includes:
 
-A plain ML model learns *correlations* in the training data. When you simulate a cool roof you push albedo to values the model never saw — and an unconstrained model can predict **warming**, which is physically wrong (we observed exactly this). Two mechanisms prevent it, both driven by `PHYSICS_SIGNS`:
+- random held-out pixels for in-scene R² and MAE;
+- 2×2 spatial-quadrant holdout for leakage-resistant R²;
+- optional Landsat-versus-ECOSTRESS agreement.
 
-- **XGBoost** (`train_xgb`, default): `monotone_constraints` — a **hard** guarantee that ∂LST/∂albedo ≤ 0, ∂LST/∂NDVI ≤ 0, ∂LST/∂NDBI ≥ 0, etc. Deterministic, reliable for extrapolation. **Recommended for scenarios.**
-- **PINN** (`train_pinn`): a **soft** autograd penalty on the same gradients. Fits LST as well (R²≈0.87) and gives smooth physical fields, but the soft penalty can still mildly violate monotonicity far out-of-distribution (e.g. water/NDWI). Advanced/experimental.
+The spatial score is the headline metric because neighbouring raster pixels otherwise leak information across a random split.
 
-## 5. Accuracy (synthetic benchmark)
+## 5. Scenario and parcel constraints
 
-Default XGB, 128×128 synthetic grid, 5-fold CV:
+- Cool roofs, green roofs, and high-albedo paint may be assigned only to buildings.
+- Cool pavement may be assigned only to road geometry.
+- Greening and water creation may be assigned only to mapped open land.
+- Existing water is context rather than a newly proposed intervention.
+- Unnamed assets use the nearest named OSM feature within 500 m; otherwise latitude/longitude is shown.
+- Google Maps links use the public coordinate search URL and require no API key.
+- AOIs above 225 km² retain a raster fallback to avoid unusably large Overpass and browser payloads.
 
-| Metric | Value |
-|--------|-------|
-| Test R² | **0.866** |
-| 5-fold CV R² | **0.866 ± 0.003** |
-| Test MAE | **0.50 °C** |
-| Test RMSE | **0.62 °C** |
-| PINN test R² | 0.872 |
+## 6. Resolution boundary
 
-Top drivers recovered: `build_frac` (0.45) and `NDBI` (0.33) dominate heating — matches the planted physics. Scenario cooling (mean ΔLST): urban_greening 3.1 °C, green_roofs 2.1 °C, water_body 0.9 °C, cool_roofs 0.6 °C.
-
-> These numbers are on *synthetic* data and validate the pipeline machinery, not a real city. Real accuracy depends on satellite/meteo data quality and will be lower; report it from held-out real LST once `--source gee` is wired.
-
-## 6. Real-data path (wired)
-
-`run_pipeline.py --source gee` → `data/align.py::build_driver_stack`:
-1. Export each source to GeoTIFF via geemap (`landsat.export_lst`, `sentinel.export`, `era5.export`, `ghsl.export`).
-2. `align_stack` opens every raster and `rioxarray.reproject_match`-es it onto the **Landsat LST grid** (the modeling reference) — handles differing resolutions/CRS (ERA5 ~11 km, Sentinel 10 m, GHSL 100 m all resampled to the LST grid).
-3. `derive_drivers` adds `albedo` (NDVI proxy — Sentinel-2 lacks the exact Liang Landsat bands) and `build_frac` (GHSL built surface normalized by its 99th percentile).
-4. Result → `drivers.stack_to_frame` → identical downstream path as synthetic.
-
-Band layout per exported file is fixed in `align.BAND_LAYOUT`. The alignment core is pure rioxarray (no GEE) and is unit-tested offline in `tests/test_align.py`.
-
-**To run for real:** `earthengine authenticate`, set `gee.project` in `config.yaml` (or `GEE_PROJECT_ID` in `.env`) and the AOI bbox, then `--source gee`. Report real accuracy from held-out LST.
-
-## 7. Optional physical models
-
-`SOLWEIG` (mean radiant temperature, human thermal comfort) and `InVEST Urban Cooling` can be layered in as additional drivers or for validation — not required for the core pipeline.
+The working grid is 30 m, but Landsat thermal measurements are natively coarser. Parcel geometry makes recommendations operationally readable; it does not claim building-scale temperature observations. Cooling and LST values shown on a parcel are samples from the supporting model grid.
