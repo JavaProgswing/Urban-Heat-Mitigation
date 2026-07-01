@@ -40,8 +40,14 @@ CONTEXT_COLS = [f"{c}_N" for c in _CONTEXT] + [f"{c}_NC" for c in _CONTEXT]
 
 TEXTURE_COLS = ["NDVI_STD", "NDBI_STD", "albedo_STD", "BLD_H_STD"]
 
+# Workflow-validated honest-R² lifts (adversarially re-checked under block CV on
+# both Delhi and Lucknow): a ~1 km built-up context scale, and a dark-dense-built
+# index. build_frac_NCC gave the largest single-feature gain (Delhi +0.031).
+MORPH_COLS = ["build_frac_NCC", "DARKB"]
+
 DRIVER_COLS = ["NDVI", "NDBI", "NDWI", "albedo", "build_frac", "BLD_H",
-               "ELEV", "WATER_DIST"] + TEXTURE_COLS + CONTEXT_COLS + LULC_COLS
+               "ELEV", "WATER_DIST"] + TEXTURE_COLS + CONTEXT_COLS + LULC_COLS \
+              + MORPH_COLS
 TARGET_COL = "LST"
 
 # Physics priors on the sign of d(LST)/d(driver). Used as XGBoost monotonic
@@ -68,6 +74,11 @@ PHYSICS_SIGNS = {
     "NDWI_N": -1, "NDWI_NC": -1,
     "albedo_N": -1, "albedo_NC": -1,
     "build_frac_N": +1, "build_frac_NC": +1,
+    # morphology lifts (validated UNCONSTRAINED — a +1 leash fought the data and
+    # erased the gain, since build_frac/albedo are already in the model; these
+    # aren't intervention drivers and aren't refreshed in scenarios, so 0 is safe).
+    "build_frac_NCC": 0,   # ~1 km built-up surroundings
+    "DARKB": 0,            # dark dense built (build_frac*(1-albedo))
     # land-cover one-hots: presence of a hot class -> warmer (+1), cool class
     # -> cooler (-1); crop/shrub ambiguous (irrigation, density) -> unconstrained.
     "LULC_built": +1,

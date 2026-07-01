@@ -88,6 +88,12 @@ def derive_drivers(bands: dict[str, np.ndarray]) -> dict:
         out["BLD_H"] = np.clip(np.nan_to_num(out["BUILT_H"], nan=0.0),
                                0, 200).astype("float32")
 
+    # dark-dense-built index (validated honest-R² lift): a dark AND dense pixel
+    # is the hottest combination — dense rooftops that also absorb sunlight.
+    if "build_frac" in out and "albedo" in out and "DARKB" not in out:
+        out["DARKB"] = (out["build_frac"]
+                        * (1.0 - np.clip(out["albedo"], 0, 1))).astype("float32")
+
     # spatial drivers computed locally from the aligned grids (no extra GEE)
     out.update(spatial_drivers(out))
     out.update(lulc_onehot(out))
@@ -164,6 +170,12 @@ def spatial_drivers(out: dict[str, np.ndarray]) -> dict:
             extra[f"{c}_N"] = _nanmean_filter(out[c], CONTEXT_SIZE)
         if c in out and f"{c}_NC" not in out:
             extra[f"{c}_NC"] = _nanmean_filter(out[c], CONTEXT_SIZE_COARSE)
+
+    # ~1 km built-up context (validated honest-R² lift, the largest single
+    # feature: Delhi +0.031). Only build_frac at this scale transfers — the same
+    # range over other drivers over-fit, so it is added for build_frac alone.
+    if "build_frac" in out and "build_frac_NCC" not in out:
+        extra["build_frac_NCC"] = _nanmean_filter(out["build_frac"], 33)
 
     return extra
 

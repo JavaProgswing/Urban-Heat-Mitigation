@@ -666,39 +666,26 @@ if "result" in st.session_state:
         st.markdown("\n".join(f"- {b}" for b in bullets) or "_No findings._")
         mc1, mc2 = st.columns(2)
         mc1.metric("Honest R²", f"{sp:.2f}" if sp is not None else "—",
-                   help="2×2 spatial cross-validation, no leakage — true skill.")
+                   help="2×2 spatial cross-validation, no leakage — true skill "
+                        "on unseen ground. The number to quote.")
         mc2.metric("In-scene R²", f"{m['r2']:.2f}",
                    help=f"Random hold-out · MAE {m['mae']:.2f} °C (optimistic).")
-        st.markdown("##### Cooling potential by strategy")
-        scb = pd.DataFrame(
-            [{"strategy": _SCEN.get(k, k), "cooling_C": round(v.mean_cooling, 2)}
-             for k, v in a.scenarios.items()]).sort_values("cooling_C",
-                                                           ascending=False)
-        st.altair_chart(hbar(scb, "cooling_C", "strategy", color="#5ec8a8"),
-                        use_container_width=True)
 
-    p1, p2 = st.columns(2, gap="large")
-    with p1:
-        st.subheader("Material performance")
-        st.caption("Reference values from cool-surface literature "
-                   "(cost / durability are not model outputs).")
-        st.dataframe(insights.MATERIALS, use_container_width=True, hide_index=True)
-    with p2:
-        st.subheader("Neighbourhood prioritization")
-        if len(ztbl):
-            show = ztbl.assign(best=ztbl["top_strategy"].map(
-                lambda s: _SCEN.get(s, s) if s else "—"))
-            show = show[["zone", "mean_lst", "heat_risk", "pop_exposed", "best",
-                         "priority"]].rename(columns={
-                             "zone": "neighbourhood", "mean_lst": "temp °C",
-                             "heat_risk": "heat risk", "pop_exposed": "population"})
-            show = show.round(2)
-            st.dataframe(
-                show, use_container_width=True, hide_index=True,
-                column_config={"heat risk": st.column_config.ProgressColumn(
-                    "heat risk", format="%.2f", min_value=0, max_value=100)})
-        else:
-            st.caption("Zone aggregation unavailable for this AOI.")
+    st.subheader("Neighbourhood prioritization")
+    if len(ztbl):
+        show = ztbl.assign(best=ztbl["top_strategy"].map(
+            lambda s: _SCEN.get(s, s) if s else "—"))
+        show = show[["zone", "mean_lst", "heat_risk", "pop_exposed", "best",
+                     "priority"]].rename(columns={
+                         "zone": "neighbourhood", "mean_lst": "temp °C",
+                         "heat_risk": "heat risk", "pop_exposed": "population"})
+        show = show.round(2)
+        st.dataframe(
+            show, use_container_width=True, hide_index=True,
+            column_config={"heat risk": st.column_config.ProgressColumn(
+                "heat risk", format="%.2f", min_value=0, max_value=100)})
+    else:
+        st.caption("Zone aggregation unavailable for this AOI.")
 
     if "report" in st.session_state:
         png, pdf, rname = st.session_state["report"]
@@ -837,6 +824,12 @@ if "result" in st.session_state:
                 use_container_width=True, hide_index=True,
                 column_config={"value index": st.column_config.ProgressColumn(
                     "value index", format="%.2f", min_value=0, max_value=100)})
+
+        with st.expander("Cool-material reference (literature)"):
+            st.caption("Typical performance of cool surfaces — cost / durability "
+                       "are not model outputs.")
+            st.dataframe(insights.MATERIALS, use_container_width=True,
+                         hide_index=True)
 
         st.divider()
         st.markdown("##### Explore a strategy")
